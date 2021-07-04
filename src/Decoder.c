@@ -4619,214 +4619,254 @@ static ZyanStatus ZydisDecodeInstruction(ZydisDecoderContext* context,
     // Iterate through the decoder tree
     const ZydisDecoderTreeNode* node = ZydisDecoderTreeGetRootNode();
     const ZydisDecoderTreeNode* temp = ZYAN_NULL;
-    ZydisDecoderTreeNodeType node_type;
-    do
+
+    ZydisDecoderTreeNodeType node_type = node->type;
+    ZyanU16 index = 0;
+    ZyanStatus status = 0;
+
+    static void* switch_table[] = {
+        &&do_ZYDIS_NODETYPE_INVALID,
+        &&do_ZYDIS_NODETYPE_FILTER_XOP,
+        &&do_ZYDIS_NODETYPE_FILTER_VEX,
+        &&do_ZYDIS_NODETYPE_FILTER_EMVEX,
+        &&do_ZYDIS_NODETYPE_FILTER_OPCODE,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_COMPACT,
+        &&do_ZYDIS_NODETYPE_FILTER_MODRM_MOD,
+        &&do_ZYDIS_NODETYPE_FILTER_MODRM_MOD_COMPACT,
+        &&do_ZYDIS_NODETYPE_FILTER_MODRM_REG,
+        &&do_ZYDIS_NODETYPE_FILTER_MODRM_RM,
+        &&do_ZYDIS_NODETYPE_FILTER_PREFIX_GROUP1,
+        &&do_ZYDIS_NODETYPE_FILTER_MANDATORY_PREFIX,
+        &&do_ZYDIS_NODETYPE_FILTER_OPERAND_SIZE,
+        &&do_ZYDIS_NODETYPE_FILTER_ADDRESS_SIZE,
+        &&do_ZYDIS_NODETYPE_FILTER_VECTOR_LENGTH,
+        &&do_ZYDIS_NODETYPE_FILTER_REX_W,
+        &&do_ZYDIS_NODETYPE_FILTER_REX_B,
+        &&do_ZYDIS_NODETYPE_FILTER_EVEX_B,
+        &&do_ZYDIS_NODETYPE_FILTER_MVEX_E,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_AMD,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_KNC,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_MPX,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_CET,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_LZCNT,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_TZCNT,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_WBNOINVD,
+        &&do_ZYDIS_NODETYPE_FILTER_MODE_CLDEMOTE,
+    };
+
+#define DISPATCH() do { \
+        ZYAN_CHECK(status); \
+        if (!(node_type != ZYDIS_NODETYPE_INVALID) && !(node_type & ZYDIS_NODETYPE_DEFINITION_MASK)) \
+            return ZYAN_STATUS_SUCCESS; \
+        node = ZydisDecoderTreeGetChildNode(node, index); \
+        node_type = node->type; \
+        index = 0; \
+        status = 0; \
+        if (node_type > ZYDIS_NODETYPE_FILTER_MODE_CLDEMOTE) \
+            goto do_DEFAULT; \
+        goto *switch_table[node_type]; \
+    } while(0)
+
+    goto *switch_table[node_type];
+
+do_ZYDIS_NODETYPE_INVALID:
+    if (temp)
     {
-        node_type = node->type;
-        ZyanU16 index = 0;
-        ZyanStatus status = 0;
-        switch (node_type)
+        node = temp;
+        temp = ZYAN_NULL;
+        node_type = ZYDIS_NODETYPE_FILTER_MANDATORY_PREFIX;
+        if (context->prefixes.mandatory_candidate != 0x00)
         {
-        case ZYDIS_NODETYPE_INVALID:
-            if (temp)
-            {
-                node = temp;
-                temp = ZYAN_NULL;
-                node_type = ZYDIS_NODETYPE_FILTER_MANDATORY_PREFIX;
-                if (context->prefixes.mandatory_candidate != 0x00)
-                {
-                    instruction->raw.prefixes[context->prefixes.offset_mandatory].type =
-                        ZYDIS_PREFIX_TYPE_IGNORED;
-                }
-                if (context->prefixes.mandatory_candidate == 0x66)
-                {
-                    if (context->prefixes.offset_osz_override ==
-                        context->prefixes.offset_mandatory)
-                    {
-                        instruction->raw.prefixes[context->prefixes.offset_mandatory].type =
-                            ZYDIS_PREFIX_TYPE_EFFECTIVE;
-                    }
-                    instruction->attributes |= ZYDIS_ATTRIB_HAS_OPERANDSIZE;
-                }
-                continue;
-            }
-            return ZYDIS_STATUS_DECODING_ERROR;
-        case ZYDIS_NODETYPE_FILTER_XOP:
-            status = ZydisNodeHandlerXOP(instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_VEX:
-            status = ZydisNodeHandlerVEX(instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_EMVEX:
-            status = ZydisNodeHandlerEMVEX(instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_OPCODE:
-            status = ZydisNodeHandlerOpcode(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE:
-            status = ZydisNodeHandlerMode(context, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_COMPACT:
-            status = ZydisNodeHandlerModeCompact(context, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODRM_MOD:
-            status = ZydisNodeHandlerModrmMod(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODRM_MOD_COMPACT:
-            status = ZydisNodeHandlerModrmModCompact(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODRM_REG:
-            status = ZydisNodeHandlerModrmReg(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODRM_RM:
-            status = ZydisNodeHandlerModrmRm(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_PREFIX_GROUP1:
-            index = context->prefixes.group1 ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MANDATORY_PREFIX:
-            status = ZydisNodeHandlerMandatoryPrefix(context, instruction, &index);
-            temp = ZydisDecoderTreeGetChildNode(node, 0);
-            // TODO: Return to this point, if index == 0 contains a value and the previous path
-            // TODO: was not successfull
-            // TODO: Restore consumed prefix
-            break;
-        case ZYDIS_NODETYPE_FILTER_OPERAND_SIZE:
-            status = ZydisNodeHandlerOperandSize(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_ADDRESS_SIZE:
-            status = ZydisNodeHandlerAddressSize(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_VECTOR_LENGTH:
-            status = ZydisNodeHandlerVectorLength(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_REX_W:
-            status = ZydisNodeHandlerRexW(context, instruction, &index);
-            break;
-        case ZYDIS_NODETYPE_FILTER_REX_B:
-            status = ZydisNodeHandlerRexB(context, instruction, &index);
-            break;
-#ifndef ZYDIS_DISABLE_AVX512
-        case ZYDIS_NODETYPE_FILTER_EVEX_B:
-            status = ZydisNodeHandlerEvexB(instruction, &index);
-            break;
-#endif
-#ifndef ZYDIS_DISABLE_KNC
-        case ZYDIS_NODETYPE_FILTER_MVEX_E:
-            status = ZydisNodeHandlerMvexE(instruction, &index);
-            break;
-#endif
-        case ZYDIS_NODETYPE_FILTER_MODE_AMD:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_AMD_BRANCHES] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_KNC:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_KNC] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_MPX:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_MPX] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_CET:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_CET] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_LZCNT:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_LZCNT] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_TZCNT:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_TZCNT] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_WBNOINVD:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_WBNOINVD] ? 1 : 0;
-            break;
-        case ZYDIS_NODETYPE_FILTER_MODE_CLDEMOTE:
-            index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_CLDEMOTE] ? 1 : 0;
-            break;
-        default:
-            if (node_type & ZYDIS_NODETYPE_DEFINITION_MASK)
-            {
-                const ZydisInstructionDefinition* definition;
-                ZydisGetInstructionDefinition(instruction->encoding, node->value, &definition);
-                ZydisSetEffectiveOperandWidth(context, instruction, definition);
-                ZydisSetEffectiveAddressWidth(context, instruction, definition);
-
-                const ZydisInstructionEncodingInfo* info;
-                ZydisGetInstructionEncodingInfo(node, &info);
-                ZYAN_CHECK(ZydisDecodeOptionalInstructionParts(context, instruction, info));
-                ZYAN_CHECK(ZydisCheckErrorConditions(context, instruction, definition));
-
-                if (instruction->encoding == ZYDIS_INSTRUCTION_ENCODING_3DNOW)
-                {
-                    // Get actual 3dnow opcode and definition
-                    ZYAN_CHECK(ZydisInputNext(context, instruction, &instruction->opcode));
-                    node = ZydisDecoderTreeGetRootNode();
-                    node = ZydisDecoderTreeGetChildNode(node, 0x0F);
-                    node = ZydisDecoderTreeGetChildNode(node, 0x0F);
-                    node = ZydisDecoderTreeGetChildNode(node, instruction->opcode);
-                    if (node->type == ZYDIS_NODETYPE_INVALID)
-                    {
-                        return ZYDIS_STATUS_DECODING_ERROR;
-                    }
-                    ZYAN_ASSERT(node->type == ZYDIS_NODETYPE_FILTER_MODRM_MOD_COMPACT);
-                    node = ZydisDecoderTreeGetChildNode(
-                        node, (instruction->raw.modrm.mod == 0x3) ? 0 : 1);
-                    ZYAN_ASSERT(node->type & ZYDIS_NODETYPE_DEFINITION_MASK);
-                    ZydisGetInstructionDefinition(instruction->encoding, node->value, &definition);
-                }
-
-                instruction->mnemonic = definition->mnemonic;
-#ifndef ZYDIS_MINIMAL_MODE
-                instruction->meta.category = definition->category;
-                instruction->meta.isa_set = definition->isa_set;
-                instruction->meta.isa_ext = definition->isa_ext;
-                instruction->meta.branch_type = definition->branch_type;
-                ZYAN_ASSERT((instruction->meta.branch_type == ZYDIS_BRANCH_TYPE_NONE) ||
-                        ((instruction->meta.category == ZYDIS_CATEGORY_CALL) ||
-                         (instruction->meta.category == ZYDIS_CATEGORY_COND_BR) ||
-                         (instruction->meta.category == ZYDIS_CATEGORY_UNCOND_BR) ||
-                         (instruction->meta.category == ZYDIS_CATEGORY_RET)));
-                instruction->meta.exception_class = definition->exception_class;
-
-                if (!context->decoder->decoder_mode[ZYDIS_DECODER_MODE_MINIMAL])
-                {
-                    ZydisSetAttributes(context, instruction, definition);
-                    switch (instruction->encoding)
-                    {
-                    case ZYDIS_INSTRUCTION_ENCODING_XOP:
-                    case ZYDIS_INSTRUCTION_ENCODING_VEX:
-                    case ZYDIS_INSTRUCTION_ENCODING_EVEX:
-                    case ZYDIS_INSTRUCTION_ENCODING_MVEX:
-                        ZydisSetAVXInformation(context, instruction, definition);
-                        break;
-                    default:
-                        break;
-                    }
-                    ZYAN_CHECK(ZydisDecodeOperands(context, instruction, definition));
-                    const ZydisAccessedFlags* flags;
-                    if (ZydisGetAccessedFlags(definition, &flags))
-                    {
-                        instruction->attributes |= ZYDIS_ATTRIB_CPUFLAG_ACCESS;
-                        ZYAN_ASSERT((ZYAN_ARRAY_LENGTH(instruction->accessed_flags) ==
-                                     ZYAN_ARRAY_LENGTH(flags->action             )) &&
-                                    (sizeof           (instruction->accessed_flags) ==
-                                     sizeof           (flags->action             )));
-                        ZYAN_MEMCPY(&instruction->accessed_flags, &flags->action,
-                            sizeof(flags->action));
-
-                        instruction->cpu_flags_read = flags->cpu_flags_read;
-                        instruction->cpu_flags_written = flags->cpu_flags_written;
-                        instruction->fpu_flags_read = flags->fpu_flags_read;
-                        instruction->fpu_flags_written = flags->fpu_flags_written;
-                    }
-                }
-#endif
-
-                return ZYAN_STATUS_SUCCESS;
-            }
-            ZYAN_UNREACHABLE;
+            instruction->raw.prefixes[context->prefixes.offset_mandatory].type =
+                ZYDIS_PREFIX_TYPE_IGNORED;
         }
-        ZYAN_CHECK(status);
-        node = ZydisDecoderTreeGetChildNode(node, index);
-    } while ((node_type != ZYDIS_NODETYPE_INVALID) && !(node_type & ZYDIS_NODETYPE_DEFINITION_MASK));
-    return ZYAN_STATUS_SUCCESS;
+        if (context->prefixes.mandatory_candidate == 0x66)
+        {
+            if (context->prefixes.offset_osz_override ==
+                context->prefixes.offset_mandatory)
+            {
+                instruction->raw.prefixes[context->prefixes.offset_mandatory].type =
+                    ZYDIS_PREFIX_TYPE_EFFECTIVE;
+            }
+            instruction->attributes |= ZYDIS_ATTRIB_HAS_OPERANDSIZE;
+        }
+
+        node_type = node->type;
+        index = 0;
+        status = 0;
+        if (node_type > ZYDIS_NODETYPE_FILTER_MODE_CLDEMOTE)
+            goto do_DEFAULT;
+        goto *switch_table[node_type]; 
+    }
+    return ZYDIS_STATUS_DECODING_ERROR;
+do_ZYDIS_NODETYPE_FILTER_XOP:
+    status = ZydisNodeHandlerXOP(instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_VEX:
+    status = ZydisNodeHandlerVEX(instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_EMVEX:
+    status = ZydisNodeHandlerEMVEX(instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_OPCODE:
+    status = ZydisNodeHandlerOpcode(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE:
+    status = ZydisNodeHandlerMode(context, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_COMPACT:
+    status = ZydisNodeHandlerModeCompact(context, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODRM_MOD:
+    status = ZydisNodeHandlerModrmMod(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODRM_MOD_COMPACT:
+    status = ZydisNodeHandlerModrmModCompact(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODRM_REG:
+    status = ZydisNodeHandlerModrmReg(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODRM_RM:
+    status = ZydisNodeHandlerModrmRm(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_PREFIX_GROUP1:
+    index = context->prefixes.group1 ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MANDATORY_PREFIX:
+    status = ZydisNodeHandlerMandatoryPrefix(context, instruction, &index);
+    temp = ZydisDecoderTreeGetChildNode(node, 0);
+    // TODO: Return to this point, if index == 0 contains a value and the previous path
+    // TODO: was not successfull
+    // TODO: Restore consumed prefix
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_OPERAND_SIZE:
+    status = ZydisNodeHandlerOperandSize(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_ADDRESS_SIZE:
+    status = ZydisNodeHandlerAddressSize(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_VECTOR_LENGTH:
+    status = ZydisNodeHandlerVectorLength(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_REX_W:
+    status = ZydisNodeHandlerRexW(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_REX_B:
+    status = ZydisNodeHandlerRexB(context, instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_EVEX_B:
+    status = ZydisNodeHandlerEvexB(instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MVEX_E:
+    status = ZydisNodeHandlerMvexE(instruction, &index);
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_AMD:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_AMD_BRANCHES] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_KNC:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_KNC] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_MPX:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_MPX] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_CET:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_CET] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_LZCNT:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_LZCNT] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_TZCNT:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_TZCNT] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_WBNOINVD:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_WBNOINVD] ? 1 : 0;
+    DISPATCH();
+do_ZYDIS_NODETYPE_FILTER_MODE_CLDEMOTE:
+    index = context->decoder->decoder_mode[ZYDIS_DECODER_MODE_CLDEMOTE] ? 1 : 0;
+    DISPATCH();
+do_DEFAULT:
+    if (node_type & ZYDIS_NODETYPE_DEFINITION_MASK)
+    {
+        const ZydisInstructionDefinition* definition;
+        ZydisGetInstructionDefinition(instruction->encoding, node->value, &definition);
+        ZydisSetEffectiveOperandWidth(context, instruction, definition);
+        ZydisSetEffectiveAddressWidth(context, instruction, definition);
+
+        const ZydisInstructionEncodingInfo* info;
+        ZydisGetInstructionEncodingInfo(node, &info);
+        ZYAN_CHECK(ZydisDecodeOptionalInstructionParts(context, instruction, info));
+        ZYAN_CHECK(ZydisCheckErrorConditions(context, instruction, definition));
+
+        if (instruction->encoding == ZYDIS_INSTRUCTION_ENCODING_3DNOW)
+        {
+            // Get actual 3dnow opcode and definition
+            ZYAN_CHECK(ZydisInputNext(context, instruction, &instruction->opcode));
+            node = ZydisDecoderTreeGetRootNode();
+            node = ZydisDecoderTreeGetChildNode(node, 0x0F);
+            node = ZydisDecoderTreeGetChildNode(node, 0x0F);
+            node = ZydisDecoderTreeGetChildNode(node, instruction->opcode);
+            if (node->type == ZYDIS_NODETYPE_INVALID)
+            {
+                return ZYDIS_STATUS_DECODING_ERROR;
+            }
+            ZYAN_ASSERT(node->type == ZYDIS_NODETYPE_FILTER_MODRM_MOD_COMPACT);
+            node = ZydisDecoderTreeGetChildNode(
+                node, (instruction->raw.modrm.mod == 0x3) ? 0 : 1);
+            ZYAN_ASSERT(node->type & ZYDIS_NODETYPE_DEFINITION_MASK);
+            ZydisGetInstructionDefinition(instruction->encoding, node->value, &definition);
+        }
+
+        instruction->mnemonic = definition->mnemonic;
+#ifndef ZYDIS_MINIMAL_MODE
+        instruction->meta.category = definition->category;
+        instruction->meta.isa_set = definition->isa_set;
+        instruction->meta.isa_ext = definition->isa_ext;
+        instruction->meta.branch_type = definition->branch_type;
+        ZYAN_ASSERT((instruction->meta.branch_type == ZYDIS_BRANCH_TYPE_NONE) ||
+                ((instruction->meta.category == ZYDIS_CATEGORY_CALL) ||
+                    (instruction->meta.category == ZYDIS_CATEGORY_COND_BR) ||
+                    (instruction->meta.category == ZYDIS_CATEGORY_UNCOND_BR) ||
+                    (instruction->meta.category == ZYDIS_CATEGORY_RET)));
+        instruction->meta.exception_class = definition->exception_class;
+
+        if (!context->decoder->decoder_mode[ZYDIS_DECODER_MODE_MINIMAL])
+        {
+            ZydisSetAttributes(context, instruction, definition);
+            switch (instruction->encoding)
+            {
+            case ZYDIS_INSTRUCTION_ENCODING_XOP:
+            case ZYDIS_INSTRUCTION_ENCODING_VEX:
+            case ZYDIS_INSTRUCTION_ENCODING_EVEX:
+            case ZYDIS_INSTRUCTION_ENCODING_MVEX:
+                ZydisSetAVXInformation(context, instruction, definition);
+                break;
+            default:
+                break;
+            }
+            ZYAN_CHECK(ZydisDecodeOperands(context, instruction, definition));
+            const ZydisAccessedFlags* flags;
+            if (ZydisGetAccessedFlags(definition, &flags))
+            {
+                instruction->attributes |= ZYDIS_ATTRIB_CPUFLAG_ACCESS;
+                ZYAN_ASSERT((ZYAN_ARRAY_LENGTH(instruction->accessed_flags) ==
+                                ZYAN_ARRAY_LENGTH(flags->action             )) &&
+                            (sizeof           (instruction->accessed_flags) ==
+                                sizeof           (flags->action             )));
+                ZYAN_MEMCPY(&instruction->accessed_flags, &flags->action,
+                    sizeof(flags->action));
+
+                instruction->cpu_flags_read = flags->cpu_flags_read;
+                instruction->cpu_flags_written = flags->cpu_flags_written;
+                instruction->fpu_flags_read = flags->fpu_flags_read;
+                instruction->fpu_flags_written = flags->fpu_flags_written;
+            }
+        }
+#endif
+
+        return ZYAN_STATUS_SUCCESS;
+    }
+    ZYAN_UNREACHABLE;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
